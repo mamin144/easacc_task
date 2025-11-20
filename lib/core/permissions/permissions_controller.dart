@@ -37,10 +37,11 @@ class PermissionsController extends StateNotifier<PermissionsState> {
   PermissionsController()
       : super(const PermissionsState(
           hasAllPermissions: false,
-          isChecking: true,
-        )) {
-    _checkPermissions();
-  }
+          // Do not check permissions automatically on creation. The app will
+          // request/check permissions when the user navigates to the
+          // Permissions page or triggers the flow from Settings.
+          isChecking: false,
+        ));
 
   Future<void> _checkPermissions() async {
     state = state.copyWith(isChecking: true, clearError: true);
@@ -199,5 +200,30 @@ class PermissionsController extends StateNotifier<PermissionsState> {
 
   void recheckPermissions() {
     _checkPermissions();
+  }
+
+  /// Public check that updates internal state and returns whether all
+  /// required permissions are currently granted. Useful for callers that want
+  /// to decide whether to show the Permissions UI before attempting network
+  /// operations.
+  Future<bool> checkPermissions() async {
+    await _checkPermissions();
+    return state.hasAllPermissions;
+  }
+}
+
+Future<void> dumpPermissionStatuses() async {
+  final permissions = <Permission>[
+    Permission.locationWhenInUse,
+    Permission.bluetooth,
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    if (Platform.isAndroid) Permission.nearbyWifiDevices,
+  ];
+
+  for (final p in permissions) {
+    final s = await p.status;
+    print('Permission ${p.toString()}: isGranted=${s.isGranted}, '
+        'isDenied=${s.isDenied}, isPermanentlyDenied=${s.isPermanentlyDenied}, status=$s');
   }
 }

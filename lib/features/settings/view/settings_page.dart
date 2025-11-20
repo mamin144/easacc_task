@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../../../core/permissions/permissions_controller.dart';
 
 import '../../../core/routing/app_router.dart';
 import '../controller/settings_controller.dart';
@@ -13,34 +15,48 @@ class SettingsPage extends ConsumerStatefulWidget {
   ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends ConsumerState<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage>
+    with WidgetsBindingObserver {
   late TextEditingController _urlController;
+  bool _isRequestingPermissions = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final initialUrl =
         ref.read(settingsControllerProvider.select((s) => s.targetUrl));
     _urlController = TextEditingController(text: initialUrl);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.listen<SettingsState>(settingsControllerProvider, (previous, next) {
-        if (next.error != null && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(next.error!)),
-          );
-        }
-      });
-    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _urlController.dispose();
     super.dispose();
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    if (state == AppLifecycleState.resumed) {
+      // Re-check permissions when returning from App Settings
+      ref.read(permissionsControllerProvider.notifier).recheckPermissions();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Listen for state errors and show a SnackBar. ref.listen must be called
+    // inside the build method (ConsumerWidget/ConsumerState build).
+    ref.listen<SettingsState>(settingsControllerProvider, (previous, next) {
+      if (next.error != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(next.error!)),
+        );
+      }
+    });
+
     final settings = ref.watch(settingsControllerProvider);
     final notifier = ref.read(settingsControllerProvider.notifier);
 
@@ -85,12 +101,31 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                   'Network devices',
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
-                FilledButton.icon(
-                  onPressed: settings.isScanning
-                      ? null
-                      : () => notifier.scanForDevices(),
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Scan'),
+                Row(
+                  children: [
+                    FilledButton.icon(
+                      onPressed: settings.isScanning
+                          ? null
+                          : () async {
+                              final permController = ref
+                                  .read(permissionsControllerProvider.notifier);
+                              final has =
+                                  await permController.checkPermissions();
+                              if (!has) {
+                                // Open the permissions page so the user can grant them
+                                if (!mounted) return;
+                                Navigator.of(context)
+                                    .pushNamed(AppRoutes.permissions);
+                                return;
+                              }
+
+                              await notifier.scanForDevices();
+                            },
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Scan'),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                 ),
               ],
             ),
@@ -136,6 +171,86 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 onChanged: notifier.selectDevice,
               ),
             const SizedBox(height: 32),
+            // Request permissions button moved here (below device dropdown)
+            OutlinedButton.icon(
+              onPressed: _isRequestingPermissions
+                  ? null
+                  : () async {
+                      setState(() {
+                        _isRequestingPermissions = true;
+                      });
+                      try {
+                        final controller =
+                            ref.read(permissionsControllerProvider.notifier);
+                        final results =
+                            await controller.requestAllPermissions();
+
+                        final lines = results.entries.map((e) {
+                          final status = e.value;
+                          final stateText = status.isGranted
+                              ? 'granted'
+                              : status.isPermanentlyDenied
+                                  ? 'permanently denied'
+                                  : status.isDenied
+                                      ? 'denied'
+                                      : status.toString();
+                          return '${e.key}: $stateText';
+                        }).toList();
+
+                        final message = lines.join('\n');
+                        if (!mounted) return;
+                        // Show results and await for the user to dismiss the dialog.
+                        await showDialog<void>(
+                          context: context,
+                          builder: (ctx) => AlertDialog(
+                            title: const Text('Permission results'),
+                            content:
+                                SingleChildScrollView(child: Text(message)),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.of(ctx).pop(),
+                                child: const Text('Close'),
+                              ),
+                              if (results.values
+                                  .any((s) => s.isPermanentlyDenied))
+                                TextButton(
+                                  onPressed: () {
+                                    Navigator.of(ctx).pop();
+                                    controller.openSettings();
+                                  },
+                                  child: const Text('Open App Settings'),
+                                ),
+                            ],
+                          ),
+                        );
+
+                        // If any permission is permanently denied, open App Settings
+                        // automatically after the user dismisses the results dialog.
+                        if (results.values.any((s) => s.isPermanentlyDenied)) {
+                          // Small delay so the dialog fully dismisses before opening
+                          // system settings (avoids UI race conditions).
+                          await Future<void>.delayed(
+                              const Duration(milliseconds: 200));
+                          await controller.openSettings();
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() {
+                            _isRequestingPermissions = false;
+                          });
+                        }
+                      }
+                    },
+              icon: _isRequestingPermissions
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.lock_open),
+              label: const Text('Request permissions'),
+            ),
+            const SizedBox(height: 12),
             FilledButton(
               onPressed: () => Navigator.of(context).pushNamed(
                 AppRoutes.webView,

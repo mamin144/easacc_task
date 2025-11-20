@@ -17,6 +17,11 @@ class _PermissionsPageState extends ConsumerState<PermissionsPage>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // Trigger an explicit permissions check when the PermissionsPage is shown
+    // so the app does not perform permission checks at startup.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(permissionsControllerProvider.notifier).recheckPermissions();
+    });
   }
 
   @override
@@ -48,6 +53,21 @@ class _PermissionsPageState extends ConsumerState<PermissionsPage>
     }
 
     return Scaffold(
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            // If we can pop, go back to previous route (usually Settings).
+            // Otherwise, ensure the Settings page is shown.
+            if (Navigator.of(context).canPop()) {
+              Navigator.of(context).pop();
+            } else {
+              Navigator.of(context).pushReplacementNamed(AppRoutes.settings);
+            }
+          },
+        ),
+        title: const Text('Permissions'),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(24),
