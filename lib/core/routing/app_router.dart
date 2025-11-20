@@ -1,4 +1,5 @@
 class AppRoutes {
-  static const settings = '/';
+  static const permissions = '/';
+  static const settings = '/settings';
   static const webView = '/webview';
 }

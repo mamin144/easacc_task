@@ -33,7 +33,7 @@ class SettingsController extends StateNotifier<SettingsState> {
       final granted = await _ensurePermissions();
       if (!granted) {
         throw const SettingsException(
-          'Permissions are required to scan for network devices.',
+          'Permissions are required to scan for network devices. Please grant location, Bluetooth, and Wi-Fi permissions.',
         );
       }
 
@@ -43,6 +43,13 @@ class SettingsController extends StateNotifier<SettingsState> {
       ]);
 
       final devices = futures.expand((list) => list).toList();
+
+      if (devices.isEmpty) {
+        throw const SettingsException(
+          'No devices found. Make sure Bluetooth is enabled and Wi-Fi is on. Try moving closer to devices.',
+        );
+      }
+
       state = state.copyWith(
         devices: devices,
         isScanning: false,
@@ -57,7 +64,7 @@ class SettingsController extends StateNotifier<SettingsState> {
     } catch (error) {
       state = state.copyWith(
         isScanning: false,
-        error: error.toString(),
+        error: 'Scan failed: ${error.toString()}',
         clearError: false,
       );
     }
@@ -71,8 +78,10 @@ class SettingsController extends StateNotifier<SettingsState> {
       if (Platform.isAndroid) Permission.nearbyWifiDevices,
     ];
 
-    final results = await permissions.request();
-    return results.values.every((status) => status.isGranted);
+    final results = await Future.wait(
+      permissions.map((p) => p.request()),
+    );
+    return results.every((status) => status.isGranted);
   }
 
   Future<List<NetworkDevice>> _discoverWifiNetworks() async {
@@ -80,25 +89,44 @@ class SettingsController extends StateNotifier<SettingsState> {
       return [];
     }
 
-    final isEnabled = await WiFiForIoTPlugin.isEnabled();
-    if (!isEnabled) {
-      await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true);
-    }
+    try {
+      final isEnabled = await WiFiForIoTPlugin.isEnabled();
+      if (!isEnabled) {
+        await WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true);
+        // Wait a bit for Wi-Fi to enable
+        await Future<void>.delayed(const Duration(seconds: 1));
+      }
 
-    final networks = await WiFiForIoTPlugin.loadWifiList();
-    return networks
-        .where((network) => (network.ssid ?? '').isNotEmpty)
-        .map(
-          (network) => NetworkDevice(
-            id: network.bssid ??
-                network.ssid ??
-                DateTime.now().toIso8601String(),
-            name: network.ssid ?? 'Wi-Fi device',
-            address: network.bssid,
-            type: NetworkDeviceType.wifi,
-          ),
-        )
-        .toList();
+      final networks = await WiFiForIoTPlugin.loadWifiList();
+      if (networks.isEmpty) {
+        return [];
+      }
+
+      // Deduplicate by SSID
+      final seenSsids = <String>{};
+      return networks
+          .where((network) {
+            final ssid = network.ssid ?? '';
+            if (ssid.isEmpty || seenSsids.contains(ssid)) return false;
+            seenSsids.add(ssid);
+            return true;
+          })
+          .map(
+            (network) => NetworkDevice(
+              id: network.bssid ??
+                  network.ssid ??
+                  DateTime.now().toIso8601String(),
+              name: network.ssid ?? 'Wi-Fi device',
+              address: network.bssid,
+              type: NetworkDeviceType.wifi,
+            ),
+          )
+          .toList();
+    } catch (e) {
+      // Wi-Fi scanning might fail due to permissions or platform limitations
+      // Return empty list instead of throwing to allow Bluetooth scanning to continue
+      return [];
+    }
   }
 
   Future<List<NetworkDevice>> _discoverBluetoothDevices() async {
@@ -111,17 +139,28 @@ class SettingsController extends StateNotifier<SettingsState> {
       throw const SettingsException('Bluetooth is turned off.');
     }
 
+    final scanDuration = const Duration(seconds: 4);
     List<ScanResult> latest = [];
+
     final subscription = FlutterBluePlus.scanResults.listen((event) {
       latest = event;
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 4));
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await FlutterBluePlus.startScan(timeout: scanDuration);
+    // Wait for the full scan duration to collect results
+    await Future<void>.delayed(scanDuration);
     await FlutterBluePlus.stopScan();
     await subscription.cancel();
 
+    // Deduplicate devices by ID
+    final seenIds = <String>{};
     return latest
+        .where((result) {
+          final id = result.device.remoteId.str;
+          if (seenIds.contains(id)) return false;
+          seenIds.add(id);
+          return true;
+        })
         .map(
           (result) => NetworkDevice(
             id: result.device.remoteId.str,

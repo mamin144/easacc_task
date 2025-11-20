@@ -1,0 +1,194 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../routing/app_router.dart';
+import 'permissions_controller.dart';
+
+class PermissionsPage extends ConsumerStatefulWidget {
+  const PermissionsPage({super.key});
+
+  @override
+  ConsumerState<PermissionsPage> createState() => _PermissionsPageState();
+}
+
+class _PermissionsPageState extends ConsumerState<PermissionsPage>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Recheck permissions when app resumes (user might have granted them in settings)
+      ref.read(permissionsControllerProvider.notifier).recheckPermissions();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final permissionsState = ref.watch(permissionsControllerProvider);
+    final controller = ref.read(permissionsControllerProvider.notifier);
+
+    // Navigate to settings once permissions are granted
+    if (permissionsState.hasAllPermissions && !permissionsState.isChecking) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed(AppRoutes.settings);
+        }
+      });
+    }
+
+    return Scaffold(
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.security,
+                size: 80,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              const SizedBox(height: 24),
+              Text(
+                'Permissions Required',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'This app needs the following permissions to function:',
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              _PermissionItem(
+                icon: Icons.location_on,
+                title: 'Location',
+                description: 'Required to scan for Wi-Fi networks',
+              ),
+              const SizedBox(height: 16),
+              _PermissionItem(
+                icon: Icons.bluetooth,
+                title: 'Bluetooth',
+                description: 'Required to discover Bluetooth printers',
+              ),
+              const SizedBox(height: 16),
+              _PermissionItem(
+                icon: Icons.wifi,
+                title: 'Wi-Fi',
+                description: 'Required to scan for network devices',
+              ),
+              const Spacer(),
+              if (permissionsState.error != null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  margin: const EdgeInsets.only(bottom: 16),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          permissionsState.error!,
+                          style: TextStyle(
+                            color:
+                                Theme.of(context).colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (permissionsState.isChecking)
+                const CircularProgressIndicator()
+              else
+                FilledButton(
+                  onPressed: () => controller.requestPermissions(),
+                  style: FilledButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                    minimumSize: const Size(double.infinity, 56),
+                  ),
+                  child: const Text('Grant Permissions'),
+                ),
+              if (permissionsState.error != null &&
+                  permissionsState.error!.contains('permanently denied'))
+                const SizedBox(height: 12),
+              if (permissionsState.error != null &&
+                  permissionsState.error!.contains('permanently denied'))
+                OutlinedButton(
+                  onPressed: () {
+                    controller.openSettings();
+                  },
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 16,
+                    ),
+                    minimumSize: const Size(double.infinity, 56),
+                  ),
+                  child: const Text('Open App Settings'),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PermissionItem extends StatelessWidget {
+  const _PermissionItem({
+    required this.icon,
+    required this.title,
+    required this.description,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Icon(icon, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Text(
+                description,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
