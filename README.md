@@ -1,4 +1,4 @@
-# easacc
+# easacc_task
 
 Cross-platform (iOS + Android) Flutter application with:
 - Configurable Settings page with network device scanning (Wi-Fi + Bluetooth printers)
@@ -45,4 +45,4 @@ Android manifest already declares Wi-Fi/Bluetooth + location permissions require
 
 ## Sending the deliverable
 
-When you’re ready to share the build or repository snapshot, email the deliverables to **hiring@easacc.com** as requested.
+When you're ready to share the build or repository snapshot, email the deliverables to **hiring@easacc.com** as requested.
