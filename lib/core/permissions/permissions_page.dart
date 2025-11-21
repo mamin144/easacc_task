@@ -126,7 +126,7 @@ class _PermissionsPageState extends ConsumerState<PermissionsPage>
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          permissionsState.error!,
+                          permissionsState.error ?? 'An error occurred',
                           style: TextStyle(
                             color:
                                 Theme.of(context).colorScheme.onErrorContainer,
@@ -151,10 +151,12 @@ class _PermissionsPageState extends ConsumerState<PermissionsPage>
                   child: const Text('Grant Permissions'),
                 ),
               if (permissionsState.error != null &&
-                  permissionsState.error!.contains('permanently denied'))
+                  (permissionsState.error?.contains('permanently denied') ??
+                      false))
                 const SizedBox(height: 12),
               if (permissionsState.error != null &&
-                  permissionsState.error!.contains('permanently denied'))
+                  (permissionsState.error?.contains('permanently denied') ??
+                      false))
                 OutlinedButton(
                   onPressed: () {
                     controller.openSettings();

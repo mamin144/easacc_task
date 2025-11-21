@@ -37,12 +37,25 @@ class SettingsController extends StateNotifier<SettingsState> {
         );
       }
 
-      final futures = await Future.wait([
-        _discoverWifiNetworks(),
-        _discoverBluetoothDevices(),
-      ]);
+      // Use try-catch for each discovery method to prevent one from crashing the other
+      List<NetworkDevice> wifiDevices = [];
+      List<NetworkDevice> bluetoothDevices = [];
 
-      final devices = futures.expand((list) => list).toList();
+      try {
+        wifiDevices = await _discoverWifiNetworks();
+      } catch (e) {
+        // Log error but continue with Bluetooth scanning
+        wifiDevices = [];
+      }
+
+      try {
+        bluetoothDevices = await _discoverBluetoothDevices();
+      } catch (e) {
+        // Log error but continue
+        bluetoothDevices = [];
+      }
+
+      final devices = [...wifiDevices, ...bluetoothDevices];
 
       if (devices.isEmpty) {
         throw const SettingsException(
@@ -62,6 +75,7 @@ class SettingsController extends StateNotifier<SettingsState> {
         clearError: false,
       );
     } catch (error) {
+      // Catch any null check errors or other exceptions
       state = state.copyWith(
         isScanning: false,
         error: 'Scan failed: ${error.toString()}',
@@ -71,17 +85,39 @@ class SettingsController extends StateNotifier<SettingsState> {
   }
 
   Future<bool> _ensurePermissions() async {
-    final permissions = <Permission>[
+    final requiredPermissions = <Permission>[
       Permission.locationWhenInUse,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
+    ];
+
+    final optionalPermissions = <Permission>[
+      // nearbyWifiDevices is optional (Android 13+ only)
       if (Platform.isAndroid) Permission.nearbyWifiDevices,
     ];
 
-    final results = await Future.wait(
-      permissions.map((p) => p.request()),
+    // Request required permissions
+    final requiredResults = await Future.wait(
+      requiredPermissions.map((p) => p.request()),
     );
-    return results.every((status) => status.isGranted);
+
+    // Check if all required permissions are granted
+    final allRequiredGranted =
+        requiredResults.every((status) => status.isGranted);
+
+    // Try to request optional permissions, but don't fail if they're not granted
+    for (final permission in optionalPermissions) {
+      try {
+        final status = await permission.status;
+        if (!status.isGranted) {
+          await permission.request();
+        }
+      } catch (e) {
+        // Ignore errors for optional permissions
+      }
+    }
+
+    return allRequiredGranted;
   }
 
   Future<List<NetworkDevice>> _discoverWifiNetworks() async {
@@ -154,24 +190,41 @@ class SettingsController extends StateNotifier<SettingsState> {
 
     // Deduplicate devices by ID
     final seenIds = <String>{};
-    return latest
-        .where((result) {
+    return latest.where((result) {
+      try {
+        final id = result.device.remoteId.str;
+        if (id.isEmpty || seenIds.contains(id)) return false;
+        seenIds.add(id);
+        return true;
+      } catch (e) {
+        // Skip devices with invalid IDs - catch any null check errors
+        return false;
+      }
+    }).map(
+      (result) {
+        try {
+          // Safely access device properties with try-catch to handle any null issues
           final id = result.device.remoteId.str;
-          if (seenIds.contains(id)) return false;
-          seenIds.add(id);
-          return true;
-        })
-        .map(
-          (result) => NetworkDevice(
-            id: result.device.remoteId.str,
-            name: result.device.platformName.isNotEmpty
-                ? result.device.platformName
-                : 'Bluetooth device',
-            address: result.device.remoteId.str,
+          final platformName = result.device.platformName;
+
+          return NetworkDevice(
+            id: id.isNotEmpty ? id : DateTime.now().toIso8601String(),
+            name: platformName.isNotEmpty ? platformName : 'Bluetooth device',
+            address: id.isNotEmpty ? id : null,
             type: NetworkDeviceType.bluetooth,
-          ),
-        )
-        .toList();
+          );
+        } catch (e) {
+          // Return a default device if there's any error accessing device properties
+          // This catches null check operator errors and other exceptions
+          return NetworkDevice(
+            id: DateTime.now().toIso8601String(),
+            name: 'Bluetooth device',
+            address: null,
+            type: NetworkDeviceType.bluetooth,
+          );
+        }
+      },
+    ).toList();
   }
 }
 

@@ -24,9 +24,10 @@ class _WebViewPageState extends ConsumerState<WebViewPage> {
         NavigationDelegate(
           onWebResourceError: (error) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(error.description)),
-            );
+            // ScaffoldMessenger.of(context).showSnackBar(
+            //   SnackBar(
+            //       content: Text(error.description ?? 'Web resource error')),
+            // );
           },
         ),
       );

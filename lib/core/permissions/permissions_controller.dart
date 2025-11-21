@@ -46,28 +46,41 @@ class PermissionsController extends StateNotifier<PermissionsState> {
   Future<void> _checkPermissions() async {
     state = state.copyWith(isChecking: true, clearError: true);
     final permissions = _getRequiredPermissions();
+    final optionalPermissions = _getOptionalPermissions();
     final statuses = await Future.wait(
       permissions.map((p) => p.status),
     );
 
-    final hasAll = statuses.every((status) => status.isGranted);
+    // Check required permissions (all must be granted)
+    final hasAllRequired = statuses.every((status) => status.isGranted);
 
-    if (!hasAll) {
-      // Find missing permissions
+    if (!hasAllRequired) {
+      // Find missing required permissions (excluding optional ones)
       final missingPermissions = <String>[];
       for (int i = 0; i < permissions.length; i++) {
-        if (!statuses[i].isGranted) {
-          missingPermissions.add(_getPermissionName(permissions[i]));
+        final permission = permissions[i];
+        // Skip optional permissions - they're not required
+        if (!optionalPermissions.contains(permission) &&
+            !statuses[i].isGranted) {
+          missingPermissions.add(_getPermissionName(permission));
         }
       }
 
-      final missingList = missingPermissions.join(', ');
-      state = state.copyWith(
-        hasAllPermissions: false,
-        isChecking: false,
-        error:
-            'Missing permissions: $missingList. Please grant all permissions to continue.',
-      );
+      if (missingPermissions.isNotEmpty) {
+        final missingList = missingPermissions.join(', ');
+        state = state.copyWith(
+          hasAllPermissions: false,
+          isChecking: false,
+          error:
+              'Missing permissions: $missingList. Please grant all permissions to continue.',
+        );
+      } else {
+        // Only optional permissions are missing, which is OK
+        state = state.copyWith(
+          hasAllPermissions: true,
+          isChecking: false,
+        );
+      }
     } else {
       state = state.copyWith(
         hasAllPermissions: true,
@@ -85,7 +98,17 @@ class PermissionsController extends StateNotifier<PermissionsState> {
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
       Permission.bluetoothAdvertise,
-      // Android 13+ permission for nearby Wi-Fi devices
+      // Android 13+ permission for nearby Wi-Fi devices (optional - only required on Android 13+)
+      if (Platform.isAndroid) Permission.nearbyWifiDevices,
+    ];
+  }
+
+  /// Returns permissions that are optional and won't cause the app to fail
+  /// if they're not granted. These are typically version-specific permissions.
+  List<Permission> _getOptionalPermissions() {
+    return [
+      // nearbyWifiDevices is only required on Android 13+ (API 33+)
+      // On older versions or if not granted, we can still function with location permission
       if (Platform.isAndroid) Permission.nearbyWifiDevices,
     ];
   }
@@ -113,6 +136,7 @@ class PermissionsController extends StateNotifier<PermissionsState> {
   Future<Map<String, PermissionStatus>> requestAllPermissions() async {
     state = state.copyWith(isChecking: true, clearError: true);
     final permissions = _getRequiredPermissions();
+    final optionalPermissions = _getOptionalPermissions();
     final Map<String, PermissionStatus> results = {};
 
     try {
@@ -121,8 +145,14 @@ class PermissionsController extends StateNotifier<PermissionsState> {
         results[_getPermissionName(p)] = status;
       }
 
-      final allGranted = results.values.every((s) => s.isGranted);
-      state = state.copyWith(hasAllPermissions: allGranted, isChecking: false);
+      // Check if all required (non-optional) permissions are granted
+      final requiredPermissions =
+          permissions.where((p) => !optionalPermissions.contains(p)).toList();
+      final allRequiredGranted = requiredPermissions
+          .every((p) => results[_getPermissionName(p)]?.isGranted ?? false);
+
+      state = state.copyWith(
+          hasAllPermissions: allRequiredGranted, isChecking: false);
       return results;
     } catch (e) {
       state = state.copyWith(
@@ -139,29 +169,25 @@ class PermissionsController extends StateNotifier<PermissionsState> {
 
     try {
       final permissions = _getRequiredPermissions();
+      final optionalPermissions = _getOptionalPermissions();
       final results = await Future.wait(
         permissions.map((p) => p.request()),
       );
 
-      final allGranted = results.every((status) => status.isGranted);
-
-      if (!allGranted) {
-        // Check current statuses to identify missing permissions
-        final statuses = await Future.wait(
-          permissions.map((p) => p.status),
-        );
-
-        // Find missing permissions
-        final missingPermissions = <String>[];
-        for (int i = 0; i < permissions.length; i++) {
-          if (!statuses[i].isGranted) {
-            missingPermissions.add(_getPermissionName(permissions[i]));
-          }
+      // Find missing required permissions (excluding optional ones)
+      final missingPermissions = <String>[];
+      for (int i = 0; i < permissions.length; i++) {
+        final permission = permissions[i];
+        // Skip optional permissions - they're not required
+        if (!optionalPermissions.contains(permission) &&
+            !results[i].isGranted) {
+          missingPermissions.add(_getPermissionName(permission));
         }
+      }
 
+      if (missingPermissions.isNotEmpty) {
         final permanentlyDenied =
-            statuses.any((status) => status.isPermanentlyDenied);
-
+            results.any((status) => status.isPermanentlyDenied);
         final missingList = missingPermissions.join(', ');
 
         if (permanentlyDenied) {
@@ -180,6 +206,7 @@ class PermissionsController extends StateNotifier<PermissionsState> {
           );
         }
       } else {
+        // All required permissions are granted (optional ones may be missing, which is OK)
         state = state.copyWith(
           hasAllPermissions: true,
           isChecking: false,

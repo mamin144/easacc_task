@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../../../core/permissions/permissions_controller.dart';
+import '../../auth/controller/auth_controller.dart';
 
 import '../../../core/routing/app_router.dart';
 import '../controller/settings_controller.dart';
@@ -52,7 +53,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
     ref.listen<SettingsState>(settingsControllerProvider, (previous, next) {
       if (next.error != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(next.error!)),
+          SnackBar(content: Text(next.error ?? 'An error occurred')),
         );
       }
     });
@@ -79,7 +80,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
           children: [
             Text(
               'Website source',
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context).textTheme.titleMedium ??
+                  Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 12),
             TextField(
@@ -99,7 +101,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
               children: [
                 Text(
                   'Network devices',
-                  style: Theme.of(context).textTheme.titleMedium,
+                  style: Theme.of(context).textTheme.titleMedium ??
+                      Theme.of(context).textTheme.titleLarge,
                 ),
                 Row(
                   children: [
@@ -112,11 +115,20 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                               final has =
                                   await permController.checkPermissions();
                               if (!has) {
-                                // Open the permissions page so the user can grant them
-                                if (!mounted) return;
-                                Navigator.of(context)
-                                    .pushNamed(AppRoutes.permissions);
-                                return;
+                                // Request permissions directly instead of navigating to permissions page
+                                await permController.requestPermissions();
+                                // Re-check after requesting
+                                final hasAfterRequest =
+                                    await permController.checkPermissions();
+                                if (!hasAfterRequest && mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                          'Permissions are required to scan for devices. Please grant all permissions.'),
+                                    ),
+                                  );
+                                  return;
+                                }
                               }
 
                               await notifier.scanForDevices();
@@ -151,7 +163,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        settings.error!,
+                        settings.error ?? 'An error occurred',
                         style: TextStyle(
                           color: Theme.of(context).colorScheme.onErrorContainer,
                         ),
@@ -257,6 +269,25 @@ class _SettingsPageState extends ConsumerState<SettingsPage>
               ),
               child: const Text('Open Web View'),
             ),
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () async {
+                final authController =
+                    ref.read(authControllerProvider.notifier);
+                await authController.signOut();
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text('Sign Out'),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 32,
+                  vertical: 16,
+                ),
+                minimumSize: const Size(double.infinity, 56),
+              ),
+            ),
           ],
         ),
       ),
@@ -277,16 +308,38 @@ class _DeviceDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (devices.isEmpty) {
+      return DropdownButtonFormField<NetworkDevice>(
+        value: null,
+        items: const [],
+        decoration: const InputDecoration(
+          labelText: 'No devices found',
+        ),
+        onChanged: (_) {},
+      );
+    }
+
     return DropdownButtonFormField<NetworkDevice>(
       value: selected,
-      items: devices
-          .map(
-            (device) => DropdownMenuItem(
+      items: devices.map(
+        (device) {
+          try {
+            final deviceName =
+                device.name.isNotEmpty ? device.name : 'Unknown device';
+            // Use toString().split('.') to safely get enum name
+            final typeName = device.type.toString().split('.').last;
+            return DropdownMenuItem(
               value: device,
-              child: Text('${device.name} • ${device.type.name}'),
-            ),
-          )
-          .toList(),
+              child: Text('$deviceName • $typeName'),
+            );
+          } catch (e) {
+            return DropdownMenuItem(
+              value: device,
+              child: const Text('Unknown device'),
+            );
+          }
+        },
+      ).toList(),
       decoration: const InputDecoration(
         labelText: 'Detected devices',
       ),
