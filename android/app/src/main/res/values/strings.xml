@@ -7,5 +7,7 @@
     <string name="fb_login_protocol_scheme">fb1380672616780238</string>
     <!-- Facebook Client Token -->
     <string name="facebook_client_token">a1ec4c3d33e36dcdef7c65171d81e41e</string>
+    <!-- Google Web Client ID -->
+    <string name="default_web_client_id">911981193074-qoi3ncu8tlkgevqctsha3ppc9pl28sjc.apps.googleusercontent.com</string>
 </resources>
 

@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../state/auth_state.dart';
@@ -15,6 +16,12 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn(
+    scopes: ['email', 'profile'],
+    // Web Client ID from Google Cloud Console
+    serverClientId:
+        '911981193074-qoi3ncu8tlkgevqctsha3ppc9pl28sjc.apps.googleusercontent.com',
+  );
 
   Future<void> _checkAuthState() async {
     state = state.copyWith(isLoading: true);
@@ -118,6 +125,60 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
+  Future<void> signInWithGoogle() async {
+    state = state.copyWith(isLoading: true, clearError: true);
+
+    try {
+      // Trigger Google Sign-In
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+
+      if (googleUser == null) {
+        // User cancelled the sign-in
+        state = state.copyWith(isLoading: false);
+        return;
+      }
+
+      // Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth =
+          await googleUser.authentication;
+
+      // Create a new credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Sign in to Firebase with Google credential
+      final userCredential = await _auth.signInWithCredential(credential);
+
+      // Check if user exists
+      final user = userCredential.user;
+      if (user == null) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'Failed to get user information',
+        );
+        return;
+      }
+
+      // Save user ID to shared preferences
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('user_id', user.uid);
+
+      state = AuthState.authenticated(user);
+    } on FirebaseAuthException catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: 'Authentication failed: ${e.message ?? 'Unknown error'}',
+      );
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: 'An error occurred: ${e.toString()}',
+      );
+    }
+  }
+
   Future<void> signOut() async {
     state = state.copyWith(isLoading: true);
 
@@ -127,6 +188,9 @@ class AuthController extends StateNotifier<AuthState> {
 
       // Sign out from Facebook
       await FacebookAuth.instance.logOut();
+
+      // Sign out from Google
+      await _googleSignIn.signOut();
 
       // Clear shared preferences
       final prefs = await SharedPreferences.getInstance();

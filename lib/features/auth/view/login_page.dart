@@ -54,17 +54,34 @@ class LoginPage extends ConsumerWidget {
                 if (authState.isLoading)
                   const CircularProgressIndicator()
                 else
-                  FilledButton.icon(
-                    onPressed: () => authController.signInWithFacebook(),
-                    icon: const Icon(Icons.facebook),
-                    label: const Text('Sign in with Facebook'),
-                    style: FilledButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 32,
-                        vertical: 16,
+                  Column(
+                    children: [
+                      FilledButton.icon(
+                        onPressed: () => authController.signInWithFacebook(),
+                        icon: const Icon(Icons.facebook),
+                        label: const Text('Sign in with Facebook'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          minimumSize: const Size(double.infinity, 56),
+                        ),
                       ),
-                      minimumSize: const Size(double.infinity, 56),
-                    ),
+                      const SizedBox(height: 16),
+                      OutlinedButton.icon(
+                        onPressed: () => authController.signInWithGoogle(),
+                        icon: const Icon(Icons.g_mobiledata),
+                        label: const Text('Sign in with Google'),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 16,
+                          ),
+                          minimumSize: const Size(double.infinity, 56),
+                        ),
+                      ),
+                    ],
                   ),
               ],
             ),
